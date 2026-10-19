@@ -1,0 +1,67 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Environment config (local secrets). Keep .env out of source control; the
+# committed .env.example documents the required keys without values.
+.env
+.env.*
+!.env.example
+
+# Node dependencies and package-manager noise (root-level tooling + any nested)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Firebase per-platform config containing real project keys. Kept out of the
+# public repo; the app reads the local copy. Remove these lines if you intend
+# to commit them (they ship inside the app binary anyway and rely on Firebase
+# security rules). Provide a sanitized example instead for collaborators.
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+macos/Runner/GoogleService-Info.plist
+
+# Supabase local temp
+supabase/.temp/

@@ -1,0 +1,230 @@
+rules_version = '2';
+
+// LearnX Firestore Security Rules
+//
+// Implements the design's "Security Rules Approach":
+//   - Default deny: nothing is readable/writable unless a rule below allows it.
+//   - Per-user isolation: everything under users/{uid}/** requires the caller
+//     to own that uid (request.auth.uid == uid).
+//   - Server-only collections: usage/** and reports/** are written only by
+//     Cloud Functions via the Admin SDK (which bypasses these rules). Clients
+//     may read their own usage/reports but never mutate them.
+//   - Read-only client fields: accountTier and consent.policyVersion cannot be
+//     set or changed by clients (reserved for the server / billing phase).
+//   - Authored content: content/** and quizItems/** are readable by any
+//     authenticated user and writable only by the server/admin.
+//   - Enum validation on profile writes for nativeLanguage, goal, englishLevel,
+//     and placementLevel.
+//   - Consent gate: personal-data / feature writes require the parent user doc
+//     to have consent.dpdpAccepted == true. (DPDP, Requirement 10.3)
+//
+// Requirements: 2.3, 2.5, 10.3, 11.3, 11.4
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // The parent user root document's data (used for the consent gate).
+    function userData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    // Consent gate: the user root doc must record DPDP consent before any
+    // personal-data / feature write is permitted. (Requirement 10.3)
+    function hasConsent(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        && userData(uid).get('consent', {}).get('dpdpAccepted', false) == true;
+    }
+
+    // --- Enum sets (see design "Firestore Collections") ---
+
+    function validNativeLanguage(v) {
+      return v in ['hi', 'ta', 'te', 'bn', 'mr'];
+    }
+
+    function validGoal(v) {
+      return v in ['speaking', 'job', 'both'];
+    }
+
+    function validCefr(v) {
+      return v in ['A1', 'A2', 'B1', 'B2', 'C1'];
+    }
+
+    // Validate profile enum fields. Fields are checked only when present so a
+    // profile can be written incrementally during onboarding; any present
+    // value must be a member of its allowed set. (Requirements 2.3, 2.5)
+    function validProfile(d) {
+      return (!('nativeLanguage' in d) || validNativeLanguage(d.nativeLanguage))
+        && (!('goal' in d) || validGoal(d.goal))
+        && (!('englishLevel' in d) || validCefr(d.englishLevel))
+        && (!('placementLevel' in d) || validCefr(d.placementLevel));
+    }
+
+    // Progress document validation. The Rules language cannot iterate a list
+    // of maps, so badges[].tier cannot be enum-checked per element here; we
+    // enforce that badges, when present, is a list (see closing note).
+    function validProgress(d) {
+      return !('badges' in d) || d.badges is list;
+    }
+
+    // accountTier is read-only to clients: it may only ever be "free" from a
+    // client (the server/billing phase promotes to "premium" via the Admin
+    // SDK, which bypasses rules).
+    function accountTierAllowedOnCreate() {
+      return request.resource.data.get('accountTier', 'free') == 'free';
+    }
+
+    function accountTierUnchanged() {
+      return request.resource.data.get('accountTier', 'free')
+        == resource.data.get('accountTier', 'free');
+    }
+
+    // consent.policyVersion is read-only to clients: clients may record their
+    // acceptance (dpdpAccepted / acceptedAt) but not stamp the policy version,
+    // which the server owns.
+    function policyVersionAbsentOnCreate() {
+      return request.resource.data.get('consent', {}).get('policyVersion', null) == null;
+    }
+
+    function policyVersionUnchanged() {
+      return request.resource.data.get('consent', {}).get('policyVersion', null)
+        == resource.data.get('consent', {}).get('policyVersion', null);
+    }
+
+    // ---------------------------------------------------------------------
+    // Authored, global content — read-only to authenticated users.
+    //
+    // The authored path tree (content/paths/{pathId}/sections/{sectionId}/
+    // weeks/{weekId}/steps/{stepId}) and the quiz-item bank are writable only
+    // by the server/admin. The recursive {document=**} wildcard covers every
+    // nested collection/document under each root. (Requirement 3.1 read side)
+    // ---------------------------------------------------------------------
+
+    match /content/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /quizItems/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ---------------------------------------------------------------------
+    // Per-user tree: users/{uid}/**
+    // ---------------------------------------------------------------------
+
+    match /users/{uid} {
+
+      // Root user document. Owner may read and create/update, subject to the
+      // read-only field constraints. Deletion is performed server-side by the
+      // deleteMyData callable (Admin SDK), never by the client.
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && accountTierAllowedOnCreate()
+        && policyVersionAbsentOnCreate();
+      allow update: if isOwner(uid)
+        && accountTierUnchanged()
+        && policyVersionUnchanged();
+      allow delete: if false;
+
+      // Profile: englishLevel, goal, nativeLanguage, placementLevel, onboarded.
+      // Enum-validated and consent-gated. (Requirements 2.3, 2.5, 10.3)
+      match /profile/{document} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid)
+          && hasConsent(uid)
+          && validProfile(request.resource.data);
+      }
+
+      // Per-user progress over the authored path (feature data — consent-gated).
+      match /pathProgress/{stepId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && hasConsent(uid);
+      }
+
+      // Chat sessions and their messages (feature data — consent-gated).
+      match /chatSessions/{sessionId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && hasConsent(uid);
+
+        match /messages/{messageId} {
+          allow read: if isOwner(uid);
+          allow write: if isOwner(uid) && hasConsent(uid);
+        }
+      }
+
+      // Wrong-correction reports: server-only write (moderation review queue),
+      // owner may read their own. (Requirements 11.3, 11.4 tamper-proofing)
+      match /reports/{reportId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // Spaced-repetition review queue (feature data — consent-gated).
+      match /reviewQueue/{itemId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && hasConsent(uid);
+      }
+
+      // Quiz sessions (feature data — consent-gated).
+      match /quizSessions/{sessionId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && hasConsent(uid);
+      }
+
+      // Progress / rewards singleton (+ dailyActivity subcollection).
+      // Consent-gated. badges[].tier enum is documented below.
+      match /progress/{document} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid)
+          && hasConsent(uid)
+          && validProgress(request.resource.data);
+
+        match /dailyActivity/{day} {
+          allow read: if isOwner(uid);
+          allow write: if isOwner(uid) && hasConsent(uid);
+        }
+      }
+
+      // Weekly summaries are aggregated by the scheduled Cloud Function
+      // (Admin SDK); clients read their own but do not write them.
+      match /weeklySummaries/{isoWeek} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // Server-written usage counters: owner may read (to show remaining
+      // quota) but never mutate. Written only by Cloud Functions via the
+      // Admin SDK. (Requirements 11.3, 11.4)
+      match /usage/{day} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Note on badges[].tier enum validation
+//
+// The design calls for validating badge.tier ∈ {bronze, silver, gold} on
+// write. progress/main stores `badges` as a list of maps
+// ({ tier, awardedAt, milestone }). The Firestore Rules language has no way to
+// iterate or map/filter over a list of arbitrary length, so per-element map
+// field enum validation is not expressible here. validProgress() therefore
+// enforces that `badges`, when present, is a list; the concrete tier enum is
+// enforced client-side (config-driven thresholds, task 10.3) and can be
+// double-checked server-side if badge writes are ever moved behind a callable.
+// ---------------------------------------------------------------------------
