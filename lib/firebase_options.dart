@@ -69,8 +69,8 @@ class DefaultFirebaseOptions {
 
   // NOTE: PLACEHOLDER — no Windows Firebase app registered yet.
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'PLACEHOLDER_WINDOWS_API_KEY',
-    appId: 'PLACEHOLDER_WINDOWS_APP_ID',
+    apiKey: 'AIzaSyCz3W2GekTjgalE7GNmlnQKVUDl7Q9Q4q8',
+    appId: '1:573517079770:web:81c7463cc45b189fa171e3',
     messagingSenderId: '573517079770',
     projectId: 'learnx-ai-4fd9b',
     authDomain: 'learnx-ai-4fd9b.firebaseapp.com',

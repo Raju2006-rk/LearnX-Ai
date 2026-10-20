@@ -1,8 +1,11 @@
 ﻿# CI for LearnX: builds and tests the Flutter client and the Cloud Functions.
 #
-# Repository policy requires every action to be pinned to a full-length commit
-# SHA (not a tag like @v4). Each `uses:` below is pinned to a 40-char SHA with
-# the human-readable version in a trailing comment.
+# Repository policy requires EVERY action - including actions used transitively
+# by other actions - to be pinned to a full-length commit SHA. Third-party
+# wrappers like subosito/flutter-action internally call actions/cache@v4 (a
+# tag), which the policy rejects and which we cannot pin from here. To stay
+# fully compliant we use only actions/* pinned to SHAs and install Flutter
+# directly from the official git repo instead of a wrapper action.
 name: CI
 
 on:
@@ -20,11 +23,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@f2c4f6686ca8e8d6e6d0f28410eeef506ed66aff # v2.18.0
-        with:
-          channel: stable
-          cache: true
+      - name: Install Flutter (stable)
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Flutter doctor
+        run: flutter --version
 
       - name: Install dependencies
         run: flutter pub get
@@ -49,8 +54,6 @@ jobs:
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: functions/package-lock.json
 
       - name: Install dependencies
         run: npm ci
