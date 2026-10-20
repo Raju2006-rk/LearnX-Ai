@@ -31,6 +31,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Keep the prebuilt Flutter web output tracked so Vercel can serve it as a
+# static site without building Flutter on its runner.
+!/build/
+!/build/web/
+!/build/web/**
 /coverage/
 
 # Symbolication related
@@ -60,3 +65,4 @@ yarn-error.log*
 # to commit them (they ship inside the app binary anyway and rely on Firebase
 # security rules). Provide a sanitized example instead for collaborators.
 android/app/google-services.json
+
