@@ -2,3 +2,9 @@ node_modules/
 lib/
 *.log
 .DS_Store
+
+# Local environment config (project/model vars; may contain sensitive values).
+# Never commit .env; the tracked .env.example documents the keys without values.
+.env
+.env.*
+!.env.example

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,7 +15,7 @@ import 'auth_data_source.dart';
 /// sign-in, then creates-or-restores the learner's account (`users/{uid}`)
 /// and profile (`users/{uid}/profile/main`) documents, and returns a typed
 /// [Result] carrying an [AuthSession] on success or an [AppException] on
-/// failure. (Requirements 1.1–1.4, 1.6)
+/// failure. (Requirements 1.1â€“1.4, 1.6)
 ///
 /// All Firebase/SDK errors are normalized here into the app's exception
 /// hierarchy: connectivity problems become [NetworkException]; every other
@@ -130,12 +130,25 @@ class AuthRepository {
   Future<AuthSession> _createOrRestore(AuthUserResult result) async {
     final uid = result.uid;
     final userRef = _firestore.doc(FirestorePaths.userDoc(uid));
-    final snapshot = await userRef.get();
+    final profileRef = _firestore.doc(FirestorePaths.profileDoc(uid));
+
+    // The user and profile documents are independent, so read them concurrently
+    // rather than serially: on web/remote Firestore each round-trip costs real
+    // latency, and the previous serial read -> write -> read -> write chain
+    // stacked four trips into the post-sign-in "saving" delay. Running the two
+    // reads together (then the two writes together) roughly halves the wait.
+    final reads = await Future.wait(<Future<DocumentSnapshot<Map<String, dynamic>>>>[
+      userRef.get(),
+      profileRef.get(),
+    ]);
+    final snapshot = reads[0];
+    final profileSnapshot = reads[1];
 
     final List<AuthMethod> methods;
+    final Future<void> userWrite;
     if (!snapshot.exists) {
       methods = <AuthMethod>[result.method];
-      await userRef.set(<String, dynamic>{
+      userWrite = userRef.set(<String, dynamic>{
         'createdAt': FieldValue.serverTimestamp(),
         'lastActiveAt': FieldValue.serverTimestamp(),
         'accountTier': 'free',
@@ -147,7 +160,7 @@ class AuthRepository {
             .authMethods,
         result.method,
       );
-      await userRef.set(
+      userWrite = userRef.set(
         <String, dynamic>{
           'lastActiveAt': FieldValue.serverTimestamp(),
           'authMethods': methods.map((m) => m.wireValue).toList(),
@@ -156,25 +169,22 @@ class AuthRepository {
       );
     }
 
-    await _ensureProfile(uid);
+    // Only write the profile when it does not exist yet, so a returning
+    // learner's onboarding is preserved. Run it alongside the user write.
+    final Future<void> profileWrite = profileSnapshot.exists
+        ? Future<void>.value()
+        : profileRef.set(<String, dynamic>{
+            ...const ProfileDto(onboarded: false).toMap(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+    await Future.wait(<Future<void>>[userWrite, profileWrite]);
 
     return AuthSession(
       uid: uid,
       authMethods: methods,
       isNewUser: result.isNewUser,
     );
-  }
-
-  /// Creates the profile document with defaults when it does not yet exist.
-  Future<void> _ensureProfile(String uid) async {
-    final profileRef = _firestore.doc(FirestorePaths.profileDoc(uid));
-    final profileSnapshot = await profileRef.get();
-    if (profileSnapshot.exists) return;
-
-    await profileRef.set(<String, dynamic>{
-      ...const ProfileDto(onboarded: false).toMap(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
   }
 
   /// Returns the union of the [existing] recorded methods (parsed from their
@@ -233,3 +243,4 @@ class AuthRepository {
         code == 'deadline-exceeded';
   }
 }
+

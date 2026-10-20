@@ -1,4 +1,4 @@
-# Miscellaneous
+﻿# Miscellaneous
 *.class
 *.log
 *.pyc
@@ -60,8 +60,3 @@ yarn-error.log*
 # to commit them (they ship inside the app binary anyway and rely on Firebase
 # security rules). Provide a sanitized example instead for collaborators.
 android/app/google-services.json
-ios/Runner/GoogleService-Info.plist
-macos/Runner/GoogleService-Info.plist
-
-# Supabase local temp
-supabase/.temp/

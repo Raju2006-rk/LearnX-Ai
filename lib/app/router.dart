@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -111,7 +111,15 @@ final authStateProvider = Provider<AuthState>((ref) {
 final recordedConsentProvider = StreamProvider<bool>((ref) {
   final uid = ref.watch(authStateProvider).uid;
   if (uid == null) return Stream<bool>.value(false);
-  return ref.watch(consentRepositoryProvider).watchDpdpAccepted(uid);
+  // A Firestore read that is rejected (rules), unreachable (offline), or slow
+  // must not surface as an uncaught provider error that the router treats as a
+  // dead loading state. Map any stream error to `false` ("not consented yet"),
+  // so the learner is routed to the consent screen to retry rather than a
+  // blank/spinning screen. `consentProvider` already treats loading as `false`.
+  return ref
+      .watch(consentRepositoryProvider)
+      .watchDpdpAccepted(uid)
+      .handleError((Object error, StackTrace _) {});
 }, name: 'recordedConsentProvider');
 
 /// Whether the signed-in learner has recorded DPDP consent.
@@ -144,7 +152,17 @@ final consentProvider = Provider<bool>((ref) {
 final recordedOnboardedProvider = StreamProvider<bool>((ref) {
   final uid = ref.watch(authStateProvider).uid;
   if (uid == null) return Stream<bool>.value(false);
-  return ref.watch(onboardingRepositoryProvider).watchOnboarded(uid);
+  // Same resilience as the consent gate: a rejected/slow/unreachable profile
+  // read must resolve to `false` (not onboarded yet) and emit immediately,
+  // never leaving the router pinned on a loading state. (See
+  // [recordedConsentProvider].)
+  // Same resilience as the consent gate: a rejected/slow/unreachable profile
+  // read maps to `false` (not onboarded yet) instead of an uncaught provider
+  // error, so the router never hangs. (See [recordedConsentProvider].)
+  return ref
+      .watch(onboardingRepositoryProvider)
+      .watchOnboarded(uid)
+      .handleError((Object error, StackTrace _) {});
 }, name: 'recordedOnboardedProvider');
 
 /// Whether the signed-in learner has completed onboarding.
@@ -152,7 +170,7 @@ final recordedOnboardedProvider = StreamProvider<bool>((ref) {
 /// The seam consumed by the router's redirect guard. It reflects the persisted
 /// `profile/main.onboarded` flag ([recordedOnboardedProvider]), which the
 /// adaptive placement flow sets once the learner has a level, goal, native
-/// language, and placement result — so completing placement routes the learner
+/// language, and placement result â€” so completing placement routes the learner
 /// to home, and a returning onboarded learner skips onboarding. Defaults to
 /// `false` (not onboarded) until the first snapshot arrives. Tests override
 /// this provider directly to drive the redirect guard. (Requirement 2.6)
@@ -166,11 +184,11 @@ final onboardedProvider = Provider<bool>(
 ///
 /// Guard logic (evaluated on every navigation and whenever the auth, consent,
 /// or onboarding seams change):
-/// - unauthenticated → sign-in
-/// - authenticated but consent not recorded → consent (Requirement 10.3)
-/// - authenticated and consented but not onboarded → onboarding (Requirement
+/// - unauthenticated â†’ sign-in
+/// - authenticated but consent not recorded â†’ consent (Requirement 10.3)
+/// - authenticated and consented but not onboarded â†’ onboarding (Requirement
 ///   2.6)
-/// - authenticated, consented, and onboarded → home, and kept away from the
+/// - authenticated, consented, and onboarded â†’ home, and kept away from the
 ///   sign-in, consent, and onboarding routes
 ///
 /// Consent is checked before onboarding because the security rules gate every
@@ -213,19 +231,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return atSignIn ? null : Routes.signIn;
       }
 
-      // Signed in but no consent recorded → capture consent first, since
+      // Signed in but no consent recorded â†’ capture consent first, since
       // the rules gate every profile/feature write on it. (Requirement 10.3)
       if (!consented) {
         return atConsent ? null : Routes.consent;
       }
 
-      // Signed in and consented but not onboarded → send to onboarding.
+      // Signed in and consented but not onboarded â†’ send to onboarding.
       // (Requirement 2.6)
       if (!onboarded) {
         return atOnboarding ? null : Routes.onboarding;
       }
 
-      // Signed in, consented, and onboarded → keep away from the
+      // Signed in, consented, and onboarded â†’ keep away from the
       // auth/consent/onboarding flows.
       if (atSignIn || atConsent || atOnboarding) {
         return Routes.home;
@@ -310,3 +328,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 class _RouterRefreshNotifier extends ChangeNotifier {
   void notify() => notifyListeners();
 }
+
+
+
+
